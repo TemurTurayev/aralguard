@@ -17,24 +17,28 @@
   #modebtn.demo { background:rgba(245,166,35,.13); border-color:#F5A623; color:#F5A623; }
   main { flex:1; display:flex; min-height:0; }
   #map { flex:1; }
-  aside { width:360px; background:#0A1729; border-left:1px solid #1E4463; display:flex; flex-direction:column; }
+  aside { width:370px; background:#0A1729; border-left:1px solid #1E4463; display:flex; flex-direction:column; }
   aside h3 { font-size:14px; letter-spacing:2px; color:#F5A623; padding:14px 18px 8px; }
   #feed { flex:1; overflow-y:auto; padding:0 14px 14px; }
   .alert { border:1px solid #1E4463; border-left:4px solid #3DBB7E; border-radius:10px; padding:10px 12px; margin-bottom:10px; background:#10263F; }
   .alert.red { border-left-color:#E5484D; }
   .alert.orange { border-left-color:#F5A623; }
   .alert.clear { border-left-color:#3DBB7E; }
+  .alert.net { border-left-color:#37C0B8; }
+  .alert.filtered { border-left-color:#5B7A99; opacity:.65; }
   .alert .t { font-size:11px; color:#5B7A99; }
-  .alert .d { font-weight:bold; font-size:14.5px; margin:2px 0; }
+  .alert .d { font-weight:bold; font-size:14px; margin:2px 0; }
   .alert .a { font-size:12.5px; color:#C9D8E6; line-height:1.35; }
   footer { padding:12px 22px 16px; background:#0A1729; border-top:1px solid #1E4463; }
   .row { display:flex; align-items:center; gap:14px; }
   #play { width:40px; height:40px; border-radius:50%; border:2px solid #37C0B8; background:none; color:#37C0B8; font-size:16px; cursor:pointer; }
   input[type=range] { flex:1; accent-color:#37C0B8; height:6px; }
-  #tlabel { min-width:210px; font-size:15px; }
+  #tlabel { min-width:230px; font-size:15px; }
   #tlabel b { color:#F5A623; font-size:17px; }
-  .legend { display:flex; gap:14px; font-size:11.5px; color:#9FB4C8; margin-top:8px; flex-wrap:wrap; }
+  .legend { display:flex; gap:13px; font-size:11.5px; color:#9FB4C8; margin-top:8px; flex-wrap:wrap; align-items:center; }
   .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; }
+  .dot.sm { width:7px; height:7px; }
+  .dot.gw { width:13px; height:13px; border:2px solid #37C0B8; background:none; }
   .leaflet-container { background:#08131F; }
   .lbl { background:rgba(10,23,41,.8); border:none; color:#C9D8E6; }
   #loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
@@ -63,12 +67,14 @@
     <input type="range" id="tt" min="0" max="72" step="1" value="0">
     <div id="tlabel">Prognoz: <b id="tval">hozir</b></div>
   </div>
-  <div class="legend">
+  <div class="legend" id="legend">
     <span><span class="dot" style="background:#3DBB7E"></span>xavfsiz</span>
-    <span><span class="dot" style="background:#E8D44D"></span>sariq &gt;100</span>
-    <span><span class="dot" style="background:#F5A623"></span>to'q sariq &gt;200</span>
-    <span><span class="dot" style="background:#E5484D"></span>qizil &gt;400 µg/m³ PM10</span>
-    <span style="margin-left:auto" id="legend-note">chang maydoni: CAMS global prognozi</span>
+    <span><span class="dot" style="background:#E8D44D"></span>&gt;100</span>
+    <span><span class="dot" style="background:#F5A623"></span>&gt;200</span>
+    <span><span class="dot" style="background:#E5484D"></span>&gt;400 µg/m³</span>
+    <span id="leg-nodes" style="display:none"><span class="dot sm" style="background:#37C0B8"></span>ZONT tugun</span>
+    <span id="leg-gw" style="display:none"><span class="dot gw"></span>shlyuz («ona» tugun)</span>
+    <span style="margin-left:auto" id="legend-note">slayder = kelgusi 72 soat prognozi</span>
   </div>
 </footer>
 
@@ -91,8 +97,6 @@ const ACTIONS = {
   clear:  "xavf o'tdi — odatdagi rejim",
 };
 const EMOJI = {red:'🔴', orange:'🟠', clear:'🟢'};
-
-// сетка точек для «поля» пыли (реальные данные CAMS по узлам)
 const GLats = [41.0, 42.0, 43.0, 44.0, 45.5];
 const GLons = [56.5, 58.0, 59.5, 61.0, 62.5];
 
@@ -113,151 +117,219 @@ for (const [n, ll] of Object.entries(DISTRICTS)){
     .bindTooltip(n, {permanent:true, direction:dir, offset:OFF[dir], className:'lbl', opacity:.85});
 }
 const gridDots = [];
-for (const la of GLats) for (const lo of GLons){
-  gridDots.push(L.circle([la, lo], {radius:26000, stroke:false,
-    fillColor:'#F5A623', fillOpacity:0}).addTo(map));
+for (const la of GLats) for (const lo of GLons)
+  gridDots.push(L.circle([la, lo], {radius:26000, stroke:false, fillColor:'#F5A623', fillOpacity:0}).addTo(map));
+
+// ═══ СЕНСОРНАЯ СЕТЬ (только DEMO): реальные линии развёртывания ═══
+const GATEWAYS = [
+  {name:"Mo'ynoq shlyuzi",     ll:[43.77, 59.02]},
+  {name:"Qo'ng'irot shlyuzi",  ll:[43.08, 58.90]},
+  {name:"Taxtako'pir shlyuzi", ll:[43.02, 60.27]},
+  {name:"Nukus shlyuzi",       ll:[42.46, 59.60]},
+  {name:"Beruniy shlyuzi",     ll:[41.69, 60.75]},
+  {name:"Sho'rbuloq shlyuzi",  ll:[40.75, 62.90]},
+];
+function lerpLine(pts, n){
+  const out=[]; const seg=(pts.length-1)/(n-1);
+  for(let i=0;i<n;i++){ const p=i*seg, k=Math.min(Math.floor(p), pts.length-2), f=p-k;
+    out.push([pts[k][0]+(pts[k+1][0]-pts[k][0])*f, pts[k][1]+(pts[k+1][1]-pts[k][1])*f]); }
+  return out;
+}
+const NODES = [];
+// L-линия: дуга по южной кромке Аралкума (пылевые мачты)
+lerpLine([[43.95,58.30],[44.18,59.00],[44.28,59.65],[44.12,60.25],[43.82,60.75],[43.52,61.15]], 26)
+  .forEach(ll => NODES.push({ll, type:'L'}));
+// W-буи: озёра дельты Амударьи
+lerpLine([[43.35,58.85],[43.15,59.15],[42.95,59.50],[42.75,59.70]], 10)
+  .forEach((ll,i) => NODES.push({ll:[ll[0]+((i%3)-1)*0.07, ll[1]+((i%2)?0.06:-0.05)], type:'W'}));
+// W-буи: Шурбулак (новое озеро, Бухара)
+lerpLine([[40.62,62.72],[40.78,62.95],[40.88,63.18]], 8)
+  .forEach((ll,i) => NODES.push({ll:[ll[0]+((i%2)?0.045:-0.04), ll[1]], type:'W'}));
+// R-стражи: гряда Султануиздаг у Беруни (сели/паводки с гор)
+lerpLine([[41.92,60.40],[42.05,60.75],[42.18,61.15]], 6)
+  .forEach(ll => NODES.push({ll, type:'R'}));
+const dKm=(a,b,c,d)=>{const R=6371,x=Math.sin((c-a)*Math.PI/360)**2+
+  Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin((d-b)*Math.PI/360)**2;
+  return 2*R*Math.asin(Math.sqrt(x));};
+NODES.forEach((n,i)=>{ n.id=i+1;
+  n.gw = GATEWAYS.reduce((best,g,gi)=> dKm(...n.ll,...g.ll) < dKm(...n.ll,...GATEWAYS[best].ll) ? gi : best, 0);
+});
+
+let nodeMarkers=[], gwMarkers=[], txLayer=L.layerGroup();
+function buildNetwork(){
+  nodeMarkers = NODES.map(n => L.circleMarker(n.ll, {radius:3.5, color:'#0B1D33', weight:1,
+      fillColor:'#37C0B8', fillOpacity:.9, pane:'markerPane'}).addTo(map)
+      .bindTooltip(`ZONT-${n.type} · tugun #${n.id}`));
+  gwMarkers = GATEWAYS.map(g => L.circleMarker(g.ll, {radius:8, color:'#37C0B8', weight:2.5,
+      fillColor:'#0B1D33', fillOpacity:.8}).addTo(map).bindTooltip(g.name));
+  txLayer.addTo(map);
+}
+function destroyNetwork(){
+  nodeMarkers.forEach(m=>m.remove()); gwMarkers.forEach(m=>m.remove());
+  txLayer.clearLayers(); txLayer.remove(); nodeMarkers=[]; gwMarkers=[];
 }
 
-const feed = document.getElementById('feed');
-const tt = document.getElementById('tt');
-const tval = document.getElementById('tval');
-const loading = document.getElementById('loading');
-const modebtn = document.getElementById('modebtn');
-
-let MODE = 'live';          // live | demo
-let LIVE = null;            // {hours:[iso...], grid:[[v...]/hour], dist:{name:[v...]}, events:[...]}
-
-function alertCard(e){
-  const card = document.createElement('div');
-  card.className = 'alert ' + (e.lv === 'clear' ? 'clear' : e.lv);
-  const t = document.createElement('div'); t.className = 't'; t.textContent = e.when;
-  const d = document.createElement('div'); d.className = 'd';
-  d.textContent = e.lv === 'clear'
-    ? `${EMOJI.clear} ${e.n.toUpperCase()} — xavf o'tdi`
-    : `${EMOJI[e.lv]} ${e.n.toUpperCase()} — PM10 ≈ ${e.pm} µg/m³`;
-  const a = document.createElement('div'); a.className = 'a';
-  a.textContent = ACTIONS[e.lv] || '';
-  card.append(t, d, a);
-  return card;
-}
-function renderFeed(events, upTo){
-  feed.replaceChildren();
-  const vis = events.filter(e=>e.t<=upTo).reverse();
-  if (!vis.length){
-    const c = document.createElement('div'); c.className='alert clear';
-    const a = document.createElement('div'); a.className='a';
-    a.textContent = "72 soatlik prognozda chegara oshishi kutilmaydi — tizim kuzatmoqda.";
-    c.append(a); feed.append(c);
-  } else vis.forEach(e => feed.append(alertCard(e)));
-}
-
-// ── JONLI rejim: CAMS orqali Open-Meteo (kalitsiz, CORS ochiq) ──
+// ═══ JONLI rejim: CAMS via Open-Meteo ═══
+let LIVE=null, DEMO=null, VIEW=null, MODE='live';
 async function fetchLive(){
   const q = (lats, lons) =>
     `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lats.join(',')}` +
     `&longitude=${lons.join(',')}&hourly=pm10,dust&forecast_days=4&timezone=Asia%2FTashkent`;
-  const gl = [], gn = [];
+  const gl=[], gn=[];
   for (const la of GLats) for (const lo of GLons){ gl.push(la); gn.push(lo); }
   const dNames = Object.keys(DISTRICTS);
   const [gRes, dRes] = await Promise.all([
     fetch(q(gl, gn)).then(r=>r.json()),
     fetch(q(dNames.map(n=>DISTRICTS[n][0]), dNames.map(n=>DISTRICTS[n][1]))).then(r=>r.json()),
   ]);
-  const gArr = Array.isArray(gRes) ? gRes : [gRes];
-  const dArr = Array.isArray(dRes) ? dRes : [dRes];
+  const gArr = Array.isArray(gRes)?gRes:[gRes], dArr = Array.isArray(dRes)?dRes:[dRes];
   const hours = gArr[0].hourly.time;
-  // стартуем с ближайшего часа >= сейчас
-  const nowIso = new Date().toLocaleString('sv-SE', {timeZone:'Asia/Tashkent'})
-                   .slice(0,13).replace(' ','T');
-  let h0 = hours.findIndex(h => h.slice(0,13) >= nowIso);
-  if (h0 < 0) h0 = 0;
-  const H = Math.min(73, hours.length - h0);
-  const val = (o,i) => Math.max(o.hourly.pm10[i] ?? 0, o.hourly.dust[i] ?? 0);
-  const grid = [], dist = {};
-  for (let h=0; h<H; h++) grid.push(gArr.map(o => val(o, h0+h)));
-  dNames.forEach((n,k)=>{ dist[n] = Array.from({length:H}, (_,h)=> val(dArr[k], h0+h)); });
-  // события: пересечения порогов по районам
-  const events = [], state = {};
-  for (let h=0; h<H; h++){
-    for (const n of dNames){
-      const lv = level(dist[n][h]);
-      const prev = state[n] || 'ok';
-      const when = hours[h0+h].replace('T',' ');
-      if ((lv==='orange'||lv==='red') && lv!==prev)
-        events.push({t:h, n, lv, pm:Math.round(dist[n][h]), when:`${when} · CAMS prognozi`});
-      if (lv==='ok' && (prev==='orange'||prev==='red'))
-        events.push({t:h, n, lv:'clear', pm:0, when:`${when} · CAMS prognozi`});
-      state[n] = lv;
-    }
+  const nowIso = new Date().toLocaleString('sv-SE',{timeZone:'Asia/Tashkent'}).slice(0,13).replace(' ','T');
+  let h0 = hours.findIndex(h => h.slice(0,13) >= nowIso); if (h0<0) h0=0;
+  const H = Math.min(73, hours.length-h0);
+  const val=(o,i)=>Math.max(o.hourly.pm10[i]??0, o.hourly.dust[i]??0);
+  const grid=[], dist={};
+  for (let h=0;h<H;h++) grid.push(gArr.map(o=>val(o,h0+h)));
+  dNames.forEach((n,k)=>{ dist[n]=Array.from({length:H},(_,h)=>val(dArr[k],h0+h)); });
+  const events=[], st={};
+  for (let h=0;h<H;h++) for (const n of dNames){
+    const lv=level(dist[n][h]), pv=st[n]||'ok', when=hours[h0+h].replace('T',' ');
+    if ((lv==='orange'||lv==='red')&&lv!==pv) events.push({t:h,n,lv,pm:Math.round(dist[n][h]),when:`${when} · CAMS prognozi`});
+    if (lv==='ok'&&(pv==='orange'||pv==='red')) events.push({t:h,n,lv:'clear',pm:0,when:`${when} · CAMS prognozi`});
+    st[n]=lv;
   }
-  return {hours: hours.slice(h0, h0+H), grid, dist, events, names: dNames};
+  return {hours:hours.slice(h0,h0+H), grid, dist, events, names:dNames, nodes:null};
 }
 
-// ── DEMO rejim: sintetik bo'ron stsenariysi (pitch uchun) ──
+// ═══ DEMO: шторм + рой сенсоров + фильтрация ложных ═══
 function plumeAt(t){
-  const f = t/72;
-  return {lat: SRC[0] + (41.7-SRC[0])*f, lon: SRC[1] + (60.8-SRC[1])*f,
-          r: 28000 + 90000*f, inten: t<6 ? t/6 : (t>58 ? Math.max(0,(72-t)/14) : 1)};
+  const f=t/72;
+  return {lat:SRC[0]+(41.7-SRC[0])*f, lon:SRC[1]+(60.8-SRC[1])*f,
+          r:28000+90000*f, inten:t<6?t/6:(t>58?Math.max(0,(72-t)/14):1)};
 }
-const distKm=(a,b,c,d)=>{const R=6371,x=Math.sin((c-a)*Math.PI/360)**2+
-  Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin((d-b)*Math.PI/360)**2;
-  return 2*R*Math.asin(Math.sqrt(x));};
+function pmField(la,lo,p,scale){
+  const d=dKm(la,lo,p.lat,p.lon);
+  return 650*p.inten*Math.exp(-(d*d)/(2*Math.pow(p.r/1000*scale,2)));
+}
+// детерминированные одиночные ложные срабатывания (пыль от грузовика, птица и т.п.)
+const FALSE_HITS = [{t:4,id:31},{t:11,id:7},{t:19,id:44},{t:39,id:49},{t:55,id:12}];
 function demoData(){
-  const names = Object.keys(DISTRICTS);
-  const hours=[], grid=[], dist={}; names.forEach(n=>dist[n]=[]);
+  const names=Object.keys(DISTRICTS);
+  const hours=[], grid=[], dist={}, nodePM=[];
+  names.forEach(n=>dist[n]=[]);
   const gpts=[]; for (const la of GLats) for (const lo of GLons) gpts.push([la,lo]);
   for (let t=0;t<=72;t++){
     hours.push(`DEMO+${t}`);
-    const p = plumeAt(t);
-    grid.push(gpts.map(([la,lo])=>{
-      const d=distKm(la,lo,p.lat,p.lon);
-      return 650*p.inten*Math.exp(-(d*d)/(2*Math.pow(p.r/1000*0.9,2)));
-    }));
-    for (const n of names){
-      const d=distKm(...DISTRICTS[n], p.lat, p.lon);
-      dist[n].push(650*p.inten*Math.exp(-(d*d)/(2*Math.pow(p.r/1000*0.75,2))));
-    }
+    const p=plumeAt(t);
+    grid.push(gpts.map(([la,lo])=>pmField(la,lo,p,0.9)));
+    names.forEach(n=>dist[n].push(pmField(...DISTRICTS[n],p,0.75)));
+    const row = NODES.map((n,i)=> pmField(...n.ll,p,0.75) + ((i*37+t*13)%7));
+    FALSE_HITS.forEach(f=>{ if (f.t===t) row[f.id-1]=430+((f.id*7)%60); });
+    nodePM.push(row);
   }
-  const events=[], state={};
+  // события районов
+  const events=[], st={};
   for (let t=0;t<=72;t++) for (const n of names){
-    const lv=level(dist[n][t]); const prev=state[n]||'ok';
-    if ((lv==='orange'||lv==='red') && lv!==prev)
-      events.push({t, n, lv, pm:Math.round(dist[n][t]), when:`T+${t} soat · sintetik stsenariy`});
-    if (lv==='ok' && (prev==='orange'||prev==='red'))
-      events.push({t, n, lv:'clear', pm:0, when:`T+${t} soat · sintetik stsenariy`});
-    state[n]=lv;
+    const lv=level(dist[n][t]), pv=st[n]||'ok';
+    if ((lv==='orange'||lv==='red')&&lv!==pv)
+      events.push({t,n,lv,pm:Math.round(dist[n][t]),when:`T+${t} soat · stsenariy`});
+    if (lv==='ok'&&(pv==='orange'||pv==='red'))
+      events.push({t,n,lv:'clear',pm:0,when:`T+${t} soat · stsenariy`});
+    st[n]=lv;
   }
-  return {hours, grid, dist, events, names};
+  // события сети: ложные (изолированные) vs подтверждённый фронт (≥2 соседей)
+  FALSE_HITS.forEach(f=> events.push({t:f.t, kind:'filtered', id:f.id,
+    when:`T+${f.t} soat · tarmoq mantiqi`}));
+  let confirmed=false;
+  for (let t=0;t<=72 && !confirmed;t++){
+    const hot = NODES.map((n,i)=>({n,i,pm:nodePM[t][i]}))
+      .filter(x=>x.n.type==='L' && x.pm>=LV.o && !FALSE_HITS.some(f=>f.t===t&&f.id===x.i+1));
+    for (let a=0;a<hot.length && !confirmed;a++)
+      for (let b=a+1;b<hot.length && !confirmed;b++)
+        if (dKm(...hot[a].n.ll,...hot[b].n.ll) < 35){
+          confirmed=true;
+          const spd=45, eta=Math.max(1,Math.round(dKm(...hot[a].n.ll,...DISTRICTS["Nukus"])/spd));
+          events.push({t, kind:'net', k:hot.length, spd, eta, when:`T+${t} soat · sensor tarmog'i`});
+        }
+  }
+  events.sort((a,b)=>a.t-b.t);
+  return {hours, grid, dist, events, names, nodes:nodePM};
 }
 
-let DEMO = null;
-let LIVE_VIEW = null;
-function setMode(m){
-  MODE = m;
-  modebtn.textContent = m==='live' ? '● JONLI rejim' : '◍ DEMO stsenariy';
-  modebtn.classList.toggle('demo', m!=='live');
-  document.getElementById('legend-note').textContent =
-    m==='live' ? "chang maydoni: CAMS global prognozi (jonli)" : "chang maydoni: sintetik bo'ron (namoyish)";
-  LIVE_VIEW = m==='live' ? LIVE : (DEMO ||= demoData());
-  tt.value = 0; renderView(0);
+// ═══ рендер ═══
+const feed=document.getElementById('feed'), tt=document.getElementById('tt'),
+      tval=document.getElementById('tval'), modebtn=document.getElementById('modebtn');
+function card(cls, when, title, action){
+  const c=document.createElement('div'); c.className='alert '+cls;
+  const t=document.createElement('div'); t.className='t'; t.textContent=when;
+  const d=document.createElement('div'); d.className='d'; d.textContent=title;
+  const a=document.createElement('div'); a.className='a'; a.textContent=action;
+  c.append(t,d,a); return c;
+}
+function feedCard(e){
+  if (e.kind==='filtered')
+    return card('filtered', e.when, `⚪ FILTRLANDI — tugun #${e.id}: yakka signal`,
+      "qo'shni tugunlar tasdiqlamadi (>35 km radiusda jim) — trevoga BERILMADI. Yakka sensor adashishi mumkin, to'da — yo'q.");
+  if (e.kind==='net')
+    return card('net', e.when, `📡 TARMOQ: chang fronti TASDIQLANDI (${e.k} tugun birga)`,
+      `ikki qo'shni tugun ≥200 µg/m³ · devor tezligi ~${e.spd} km/soat · Nukusgacha ETA ~${e.eta} soat · FVVga uzatildi`);
+  if (e.lv==='clear')
+    return card('clear', e.when, `${EMOJI.clear} ${e.n.toUpperCase()} — xavf o'tdi`, ACTIONS.clear);
+  return card(e.lv, e.when, `${EMOJI[e.lv]} ${e.n.toUpperCase()} — PM10 ≈ ${e.pm} µg/m³`, ACTIONS[e.lv]||'');
+}
+function renderFeed(events, upTo){
+  feed.replaceChildren();
+  const vis=events.filter(e=>e.t<=upTo).reverse();
+  if (!vis.length){
+    feed.append(card('clear','', MODE==='live'
+      ? "72 soatlik prognozda chegara oshishi kutilmaydi — tizim kuzatmoqda."
+      : "Stsenariy boshlanmoqda — tugunlar fonda tinch.", ""));
+  } else vis.forEach(e=>feed.append(feedCard(e)));
 }
 function renderView(h){
-  const L0 = LIVE_VIEW; if (!L0) return;
-  const g = L0.grid[Math.min(h, L0.grid.length-1)];
-  gridDots.forEach((c,i)=>{
-    const v = g[i] || 0;
-    c.setStyle({fillOpacity: Math.min(0.55, v/700),
-                fillColor: v>=LV.r ? '#E5484D' : v>=LV.o ? '#E08A2E' : '#F5A623'});
-  });
-  for (const n of L0.names){
-    const v = L0.dist[n][Math.min(h, L0.dist[n].length-1)];
-    markers[n].setStyle({fillColor: COLOR[level(v)]});
+  const V=VIEW; if (!V) return;
+  const g=V.grid[Math.min(h,V.grid.length-1)];
+  gridDots.forEach((c,i)=>{ const v=g[i]||0;
+    c.setStyle({fillOpacity:Math.min(0.55, v/700),
+                fillColor: v>=LV.r?'#E5484D':v>=LV.o?'#E08A2E':'#F5A623'}); });
+  for (const n of V.names){
+    const v=V.dist[n][Math.min(h,V.dist[n].length-1)];
+    markers[n].setStyle({fillColor:COLOR[level(v)]});
   }
-  tval.textContent = String(L0.hours[Math.min(h,L0.hours.length-1)]).includes('DEMO')
-    ? `T+${h} soat (namoyish)`
-    : (h===0 ? `hozir (${L0.hours[0].slice(11)})`
-             : `+${h} soat · ${L0.hours[Math.min(h,L0.hours.length-1)].replace('T',' ')}`);
-  renderFeed(L0.events, h);
+  if (V.nodes){
+    txLayer.clearLayers();
+    const row=V.nodes[Math.min(h,V.nodes.length-1)];
+    const gwHot=new Set();
+    nodeMarkers.forEach((m,i)=>{
+      const lv=level(row[i]);
+      m.setStyle({fillColor: lv==='ok' ? '#37C0B8' : COLOR[lv]});
+      if (lv==='orange'||lv==='red'){
+        gwHot.add(NODES[i].gw);
+        L.polyline([NODES[i].ll, GATEWAYS[NODES[i].gw].ll],
+          {color:'#37C0B8', weight:1.2, opacity:.4, dashArray:'4 5'}).addTo(txLayer);
+      }
+    });
+    gwMarkers.forEach((m,gi)=> m.setStyle({color: gwHot.has(gi)?'#F5A623':'#37C0B8',
+                                           fillColor: gwHot.has(gi)?'#F5A623':'#0B1D33'}));
+  }
+  tval.textContent = String(V.hours[Math.min(h,V.hours.length-1)]).includes('DEMO')
+    ? `T+${h} soat (stsenariy)`
+    : (h===0 ? `hozir (${V.hours[0].slice(11)})`
+             : `+${h} soat · ${V.hours[Math.min(h,V.hours.length-1)].replace('T',' ')}`);
+  renderFeed(V.events, h);
+}
+function setMode(m){
+  MODE=m;
+  modebtn.textContent = m==='live' ? '● JONLI rejim' : '◍ DEMO: bo\'ron + sensor to\'dasi';
+  modebtn.classList.toggle('demo', m!=='live');
+  document.getElementById('leg-nodes').style.display = m==='demo'?'inline':'none';
+  document.getElementById('leg-gw').style.display = m==='demo'?'inline':'none';
+  document.getElementById('legend-note').textContent = m==='live'
+    ? "slayder = kelgusi 72 soat prognozi (CAMS, jonli)"
+    : "stsenariy: bo'ron + 50 tugunli to'da · yakka signallar filtrlanadi";
+  if (m==='demo'){ VIEW = DEMO ||= demoData(); if (!nodeMarkers.length) buildNetwork(); map.setView([42.65,60.2],7); }
+  else { VIEW = LIVE; destroyNetwork(); map.setView([42.9,59.9],7); }
+  tt.value=0; renderView(0);
 }
 tt.addEventListener('input', ()=>renderView(+tt.value));
 let timer=null;
@@ -266,22 +338,25 @@ document.getElementById('play').addEventListener('click', function(){
   this.textContent='⏸';
   timer=setInterval(()=>{ tt.value=(+tt.value+1)%73; renderView(+tt.value); },140);
 });
-modebtn.addEventListener('click', ()=> setMode(MODE==='live' ? 'demo' : 'live'));
+modebtn.addEventListener('click', ()=> setMode(MODE==='live'?'demo':'live'));
 
 (async ()=>{
+  const wantDemo = location.hash.startsWith('#demo');
   try {
     LIVE = await fetchLive();
-    const upd = new Date().toTimeString().slice(0,5);
-    document.getElementById('chip-upd').replaceChildren('yangilangan: ', Object.assign(document.createElement('b'),{textContent:upd}));
-    const mx = Math.round(Math.max(...LIVE.names.map(n=>Math.max(...LIVE.dist[n]))));
+    const upd=new Date().toTimeString().slice(0,5);
+    document.getElementById('chip-upd').replaceChildren('yangilangan: ',
+      Object.assign(document.createElement('b'),{textContent:upd}));
+    const mx=Math.round(Math.max(...LIVE.names.map(n=>Math.max(...LIVE.dist[n]))));
     document.getElementById('chip-max').replaceChildren('72s ichida maks PM10: ',
-      Object.assign(document.createElement('b'),{textContent: mx + ' µg/m³'}));
-    setMode('live');
+      Object.assign(document.createElement('b'),{textContent:mx+' µg/m³'}));
   } catch(e) {
-    document.getElementById('chip-src').textContent = 'manba oflayn — namoyish rejimi';
-    setMode('demo');
+    document.getElementById('chip-src').textContent='manba oflayn — namoyish rejimi';
   } finally {
-    loading.remove();
+    setMode(LIVE && !wantDemo ? 'live' : 'demo');
+    const th=parseInt(location.hash.replace('#demo',''));
+    if (wantDemo && !isNaN(th)){ tt.value=Math.min(72,th); renderView(+tt.value); }
+    document.getElementById('loading').remove();
   }
 })();
 </script>
