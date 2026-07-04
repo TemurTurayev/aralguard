@@ -227,6 +227,65 @@ NODES.forEach((n,i)=>{ n.id=i+1;
   n.gw = GATEWAYS.reduce((best,g,gi)=> dKm(...n.ll,...g.ll) < dKm(...n.ll,...GATEWAYS[best].ll) ? gi : best, 0);
 });
 
+// ═══ ДИНАМИЧЕСКАЯ БУРЯ (DEMO): движущееся тело + след + фронт + стрелка ═══
+const stormLayer = L.layerGroup();
+let STORM = null;
+function buildStorm(){
+  STORM = {
+    ghosts: [L.circle(SRC,{radius:1,stroke:false,fillColor:'#F5A623',fillOpacity:0}).addTo(stormLayer),
+             L.circle(SRC,{radius:1,stroke:false,fillColor:'#F5A623',fillOpacity:0}).addTo(stormLayer)],
+    body: [L.circle(SRC,{radius:1,stroke:false,fillColor:'#F5A623',fillOpacity:0}).addTo(stormLayer),
+           L.circle(SRC,{radius:1,stroke:false,fillColor:'#E08A2E',fillOpacity:0}).addTo(stormLayer),
+           L.circle(SRC,{radius:1,stroke:false,fillColor:'#C2451E',fillOpacity:0}).addTo(stormLayer)],
+    front: L.polyline([], {color:'#E5484D', weight:3, opacity:.9, dashArray:'10 7'}).addTo(stormLayer),
+    arrow: L.polyline([], {color:'#E9F1F7', weight:2.5, opacity:.85}).addTo(stormLayer),
+    head:  L.marker(SRC, {icon: L.divIcon({className:'', iconSize:[22,22], iconAnchor:[11,11],
+             html:'<div id="storm-head" style="color:#E9F1F7;font-size:18px;text-shadow:0 0 5px #000">➤</div>'})}).addTo(stormLayer),
+    label: L.marker(SRC, {icon: L.divIcon({className:'', iconSize:[190,22], iconAnchor:[-14,11],
+             html:'<div id="storm-lbl" style="font:bold 12px Helvetica;color:#F5A623;background:rgba(10,23,41,.85);padding:3px 8px;border-radius:10px;border:1px solid #F5A623;white-space:nowrap"></div>'})}).addTo(stormLayer),
+  };
+  stormLayer.addTo(map);
+}
+function destroyStorm(){ stormLayer.clearLayers(); stormLayer.remove(); STORM=null; }
+function pt(lat, lon, br, meters){
+  return [lat + (meters/111000)*Math.cos(br),
+          lon + (meters/(111000*Math.cos(lat*Math.PI/180)))*Math.sin(br)];
+}
+function updateStorm(h){
+  if (!STORM) return;
+  const p = plumeAt(h), p2 = plumeAt(Math.min(72,h+1));
+  const alive = p.inten > 0.02;
+  const br = Math.atan2((p2.lon-p.lon)*Math.cos(p.lat*Math.PI/180), p2.lat-p.lat);
+  STORM.ghosts.forEach((g,i)=>{
+    const gh = h - 8*(i+1);
+    if (gh < 0 || !alive){ g.setStyle({fillOpacity:0}); return; }
+    const gp = plumeAt(gh);
+    g.setLatLng([gp.lat,gp.lon]); g.setRadius(gp.r*0.8);
+    g.setStyle({fillOpacity: 0.05*(2-i)*gp.inten});
+  });
+  STORM.body.forEach((c,i)=>{
+    c.setLatLng([p.lat,p.lon]);
+    c.setRadius(Math.max(1, p.r*(1-.28*i)));
+    c.setStyle({fillOpacity: alive ? p.inten*[0.18,0.26,0.34][i] : 0});
+  });
+  const arc=[];
+  if (alive) for (let a=-75;a<=75;a+=12) arc.push(pt(p.lat,p.lon,br+a*Math.PI/180,p.r*1.05));
+  STORM.front.setLatLngs(arc);
+  const tip = pt(p.lat,p.lon,br,p.r*1.55);
+  STORM.arrow.setLatLngs(alive ? [[p.lat,p.lon], tip] : []);
+  STORM.head.setLatLng(tip);
+  STORM.label.setLatLng(tip);
+  const hd=document.getElementById('storm-head'), lb=document.getElementById('storm-lbl');
+  if (hd){ hd.style.transform=`rotate(${br*180/Math.PI-90}deg)`; hd.style.opacity=alive?'1':'0'; }
+  if (lb){
+    if (alive){
+      const eta=Math.max(0,Math.round(dKm(p.lat,p.lon,...DISTRICTS["Nukus"])/45));
+      lb.textContent = `bo'ron fronti · ~45 km/soat · Nukus ETA ${eta} soat`;
+      lb.style.opacity='1';
+    } else lb.style.opacity='0';
+  }
+}
+
 let nodeMarkers=[], gwMarkers=[], txLayer=L.layerGroup();
 function buildNetwork(){
   nodeMarkers = NODES.map(n => L.circleMarker(n.ll, {radius:3.5, color:'#0B1D33', weight:1,
@@ -363,9 +422,11 @@ function renderFeed(events, upTo){
 function renderView(h){
   const V=VIEW; if (!V) return;
   const g=V.grid[Math.min(h,V.grid.length-1)];
+  const cap = V.nodes ? 0.20 : 0.55;                    // demo: сетка — тихий фон
   gridDots.forEach((c,i)=>{ const v=g[i]||0;
-    c.setStyle({fillOpacity:Math.min(0.55, v/700),
+    c.setStyle({fillOpacity:Math.min(cap, v/900),
                 fillColor: v>=LV.r?'#E5484D':v>=LV.o?'#E08A2E':'#F5A623'}); });
+  if (V.nodes) updateStorm(h);
   for (const n of V.names){
     const v=V.dist[n][Math.min(h,V.dist[n].length-1)];
     markers[n].setStyle({fillColor:COLOR[level(v)]});
@@ -402,9 +463,11 @@ function setMode(m){
     ? "slayder = kelgusi 72 soat prognozi (CAMS, jonli)"
     : "stsenariy: bo'ron + 50 tugunli to'da · yakka signallar filtrlanadi";
   document.getElementById('leg-metar').style.display = m==='live'?'inline':'none';
+  gridDots.forEach(c=>c.setRadius(m==='demo'?15000:26000));
   if (m==='demo'){ VIEW = DEMO ||= demoData(); if (!nodeMarkers.length) buildNetwork();
+    if (!STORM) buildStorm();
     map.removeLayer(groundLayer); map.setView([42.65,60.2],7); }
-  else { VIEW = LIVE; destroyNetwork();
+  else { VIEW = LIVE; destroyNetwork(); if (STORM) destroyStorm();
     if (groundCount.metar+groundCount.citizen) groundLayer.addTo(map); map.setView([42.9,59.9],7); }
   tt.value=0; renderView(0);
 }
