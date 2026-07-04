@@ -52,6 +52,7 @@
   <div class="chip" id="chip-src">manba: CAMS · Open-Meteo</div>
   <div class="chip" id="chip-upd">yangilangan: —</div>
   <div class="chip" id="chip-max">72s ichida maks PM10: —</div>
+  <div class="chip" id="chip-ground">yer stansiyalari: —</div>
   <button id="modebtn">● JONLI rejim</button>
 </header>
 <main>
@@ -72,6 +73,7 @@
     <span><span class="dot" style="background:#E8D44D"></span>&gt;100</span>
     <span><span class="dot" style="background:#F5A623"></span>&gt;200</span>
     <span><span class="dot" style="background:#E5484D"></span>&gt;400 µg/m³</span>
+    <span id="leg-metar"><span style="color:#7EB6FF">◆</span> aeroport METAR (hozirgi kuzatuv)</span>
     <span id="leg-nodes" style="display:none"><span class="dot sm" style="background:#37C0B8"></span>ZONT tugun</span>
     <span id="leg-gw" style="display:none"><span class="dot gw"></span>shlyuz («ona» tugun)</span>
     <span style="margin-left:auto" id="legend-note">slayder = kelgusi 72 soat prognozi</span>
@@ -119,6 +121,76 @@ for (const [n, ll] of Object.entries(DISTRICTS)){
 const gridDots = [];
 for (const la of GLats) for (const lo of GLons)
   gridDots.push(L.circle([la, lo], {radius:26000, stroke:false, fillColor:'#F5A623', fillOpacity:0}).addTo(map));
+
+// ═══ НАЗЕМНАЯ ПРАВДА (LIVE): METAR аэропортов + гражданские PM-датчики ═══
+const AIRPORTS = {UTNN:"Nukus", UTNU:"Urganch", UTSB:"Buxoro", UTSA:"Navoiy",
+                  UTSS:"Samarqand", UTTT:"Toshkent"};
+const groundLayer = L.layerGroup();
+let groundCount = {metar:0, citizen:0};
+function groundChip(){
+  const total = groundCount.metar + groundCount.citizen;
+  const chip = document.getElementById('chip-ground');
+  if (total === 0){
+    chip.replaceChildren('ochiq yer stansiyalari: ',
+      Object.assign(document.createElement('b'),
+        {textContent:"0 — hudud «ma'lumot cho'li»", style:'color:#F5A623'}));
+    document.getElementById('leg-metar').style.display = 'none';
+  } else {
+    chip.replaceChildren('yer stansiyalari: ',
+      Object.assign(document.createElement('b'),
+        {textContent:`${groundCount.metar} METAR · ${groundCount.citizen} fuqaro sensori`}));
+  }
+}
+async function loadGround(){
+  // METAR: NOAA Aviation Weather, ochiq, kalitsiz
+  try {
+    const r = await fetch("https://aviationweather.gov/api/data/metar?ids=" +
+      Object.keys(AIRPORTS).join(',') + "&format=json");
+    const arr = await r.json();
+    for (const m of arr){
+      const dust = /DU|DS|SS|SA/.test(m.wxString||"");
+      const visMi = parseFloat(String(m.visib||"").replace('+',''));
+      const visKm = isNaN(visMi) ? null : Math.round(visMi*1.609);
+      const lowVis = visKm!==null && visKm < 5;
+      const color = dust ? '#E5484D' : lowVis ? '#F5A623' : '#7EB6FF';
+      const icon = L.divIcon({className:'', html:
+        `<div style="color:${color};font-size:15px;text-shadow:0 0 4px #000">◆</div>`,
+        iconSize:[16,16], iconAnchor:[8,8]});
+      const ws = m.wspd!=null ? Math.round(m.wspd*0.514) : null;
+      const parts = [`${AIRPORTS[m.icaoId]||m.icaoId} aeroporti`,
+        visKm!==null ? `ko'rinish ${String(m.visib).includes('+')?'>':''}${visKm} km` : null,
+        ws!==null ? `shamol ${ws} m/s` : null,
+        dust ? "⚠ CHANG kuzatilmoqda" : null, "METAR · hozirgi kuzatuv"];
+      L.marker([m.lat, m.lon], {icon}).addTo(groundLayer)
+        .bindTooltip(parts.filter(Boolean).join(' · '));
+      groundCount.metar++;
+      if (dust && LIVE) LIVE.events.unshift({t:0, kind:'net',
+        k:0, spd:0, eta:0, when:`hozir · ${AIRPORTS[m.icaoId]} METAR`,
+        _custom:`✈ YER TASDIG'I: ${AIRPORTS[m.icaoId]} aeroporti chang kuzatmoqda (ko'rinish ${visKm} km)`});
+    }
+  } catch(e) { /* METAR manbasi vaqtincha yopiq */ }
+  // Fuqaro sensorlari: Sensor.Community, ochiq JSON
+  try {
+    const r = await fetch("https://data.sensor.community/airrohr/v1/filter/box=40.5,55.5,46.5,63.5");
+    const arr = await r.json();
+    const seen = new Set();
+    for (const s of arr){
+      const loc = s.location; if (!loc || seen.has(loc.id)) continue;
+      seen.add(loc.id);
+      const p1 = (s.sensordatavalues||[]).find(v=>v.value_type==='P1');
+      if (!p1) continue;
+      const v = Math.round(parseFloat(p1.value));
+      const icon = L.divIcon({className:'', html:
+        `<div style="color:${COLOR[level(v)]};font-size:13px;text-shadow:0 0 4px #000">▲</div>`,
+        iconSize:[14,14], iconAnchor:[7,7]});
+      L.marker([+loc.latitude, +loc.longitude], {icon}).addTo(groundLayer)
+        .bindTooltip(`fuqaro sensori · PM10 ${v} µg/m³ · Sensor.Community`);
+      groundCount.citizen++;
+    }
+  } catch(e) { /* manba yopiq */ }
+  groundChip();
+  if (MODE==='live'){ groundLayer.addTo(map); renderView(+tt.value); }
+}
 
 // ═══ СЕНСОРНАЯ СЕТЬ (только DEMO): реальные линии развёртывания ═══
 const GATEWAYS = [
@@ -271,8 +343,10 @@ function feedCard(e){
     return card('filtered', e.when, `⚪ FILTRLANDI — tugun #${e.id}: yakka signal`,
       "qo'shni tugunlar tasdiqlamadi (>35 km radiusda jim) — trevoga BERILMADI. Yakka sensor adashishi mumkin, to'da — yo'q.");
   if (e.kind==='net')
-    return card('net', e.when, `📡 TARMOQ: chang fronti TASDIQLANDI (${e.k} tugun birga)`,
-      `ikki qo'shni tugun ≥200 µg/m³ · devor tezligi ~${e.spd} km/soat · Nukusgacha ETA ~${e.eta} soat · FVVga uzatildi`);
+    return e._custom
+      ? card('net', e.when, e._custom, "sun'iy yo'ldosh prognozi yer kuzatuvi bilan solishtiriladi")
+      : card('net', e.when, `📡 TARMOQ: chang fronti TASDIQLANDI (${e.k} tugun birga)`,
+          `ikki qo'shni tugun ≥200 µg/m³ · devor tezligi ~${e.spd} km/soat · Nukusgacha ETA ~${e.eta} soat · FVVga uzatildi`);
   if (e.lv==='clear')
     return card('clear', e.when, `${EMOJI.clear} ${e.n.toUpperCase()} — xavf o'tdi`, ACTIONS.clear);
   return card(e.lv, e.when, `${EMOJI[e.lv]} ${e.n.toUpperCase()} — PM10 ≈ ${e.pm} µg/m³`, ACTIONS[e.lv]||'');
@@ -327,8 +401,11 @@ function setMode(m){
   document.getElementById('legend-note').textContent = m==='live'
     ? "slayder = kelgusi 72 soat prognozi (CAMS, jonli)"
     : "stsenariy: bo'ron + 50 tugunli to'da · yakka signallar filtrlanadi";
-  if (m==='demo'){ VIEW = DEMO ||= demoData(); if (!nodeMarkers.length) buildNetwork(); map.setView([42.65,60.2],7); }
-  else { VIEW = LIVE; destroyNetwork(); map.setView([42.9,59.9],7); }
+  document.getElementById('leg-metar').style.display = m==='live'?'inline':'none';
+  if (m==='demo'){ VIEW = DEMO ||= demoData(); if (!nodeMarkers.length) buildNetwork();
+    map.removeLayer(groundLayer); map.setView([42.65,60.2],7); }
+  else { VIEW = LIVE; destroyNetwork();
+    if (groundCount.metar+groundCount.citizen) groundLayer.addTo(map); map.setView([42.9,59.9],7); }
   tt.value=0; renderView(0);
 }
 tt.addEventListener('input', ()=>renderView(+tt.value));
@@ -356,6 +433,7 @@ modebtn.addEventListener('click', ()=> setMode(MODE==='live'?'demo':'live'));
     setMode(LIVE && !wantDemo ? 'live' : 'demo');
     const th=parseInt(location.hash.replace('#demo',''));
     if (wantDemo && !isNaN(th)){ tt.value=Math.min(72,th); renderView(+tt.value); }
+    loadGround();
     document.getElementById('loading').remove();
   }
 })();
