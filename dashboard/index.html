@@ -7,12 +7,14 @@
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family:Helvetica,Arial,sans-serif; background:#0B1D33; color:#E9F1F7; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
-  header { display:flex; align-items:center; gap:18px; padding:12px 22px; background:#0A1729; border-bottom:1px solid #1E4463; }
+  header { display:flex; align-items:center; gap:14px; padding:12px 22px; background:#0A1729; border-bottom:1px solid #1E4463; flex-wrap:wrap; }
   .logo { font-size:22px; font-weight:bold; }
   .logo span { color:#37C0B8; }
   .chip { font-size:12px; padding:4px 10px; border:1px solid #1E4463; border-radius:20px; color:#9FB4C8; }
   .chip b { color:#37C0B8; }
-  .demo { margin-left:auto; font-size:12px; font-weight:bold; padding:4px 12px; border-radius:20px; background:rgba(245,166,35,.13); border:1px solid #F5A623; color:#F5A623; }
+  #modebtn { margin-left:auto; font-size:12px; font-weight:bold; padding:5px 14px; border-radius:20px; cursor:pointer;
+             background:rgba(61,187,126,.15); border:1px solid #3DBB7E; color:#3DBB7E; }
+  #modebtn.demo { background:rgba(245,166,35,.13); border-color:#F5A623; color:#F5A623; }
   main { flex:1; display:flex; min-height:0; }
   #map { flex:1; }
   aside { width:360px; background:#0A1729; border-left:1px solid #1E4463; display:flex; flex-direction:column; }
@@ -29,22 +31,24 @@
   .row { display:flex; align-items:center; gap:14px; }
   #play { width:40px; height:40px; border-radius:50%; border:2px solid #37C0B8; background:none; color:#37C0B8; font-size:16px; cursor:pointer; }
   input[type=range] { flex:1; accent-color:#37C0B8; height:6px; }
-  #tlabel { min-width:160px; font-size:15px; }
-  #tlabel b { color:#F5A623; font-size:18px; }
-  .legend { display:flex; gap:14px; font-size:11.5px; color:#9FB4C8; margin-top:8px; }
+  #tlabel { min-width:210px; font-size:15px; }
+  #tlabel b { color:#F5A623; font-size:17px; }
+  .legend { display:flex; gap:14px; font-size:11.5px; color:#9FB4C8; margin-top:8px; flex-wrap:wrap; }
   .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; }
   .leaflet-container { background:#08131F; }
   .lbl { background:rgba(10,23,41,.8); border:none; color:#C9D8E6; }
+  #loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+             background:rgba(11,29,51,.9); z-index:2000; font-size:20px; color:#9FB4C8; }
 </style>
 </head>
 <body>
+<div id="loading">Jonli CAMS ma'lumotlari yuklanmoqda…</div>
 <header>
   <div class="logo">Aral<span>Guard</span></div>
-  <div class="chip">CAMS: <b>00z OK</b></div>
-  <div class="chip">MODIS o'tishi: <b>10:42</b></div>
-  <div class="chip">Tugunlar: <b>27/30 onlayn</b></div>
-  <div class="chip">Model: <b>ConvLSTM v0 · skill +0.31 vs CAMS</b></div>
-  <div class="demo">DEMO · sintetik stsenariy</div>
+  <div class="chip" id="chip-src">manba: CAMS · Open-Meteo</div>
+  <div class="chip" id="chip-upd">yangilangan: —</div>
+  <div class="chip" id="chip-max">72s ichida maks PM10: —</div>
+  <button id="modebtn">● JONLI rejim</button>
 </header>
 <main>
   <div id="map"></div>
@@ -57,14 +61,14 @@
   <div class="row">
     <button id="play">▶</button>
     <input type="range" id="tt" min="0" max="72" step="1" value="0">
-    <div id="tlabel">Prognoz: <b id="tval">T+0 soat</b></div>
+    <div id="tlabel">Prognoz: <b id="tval">hozir</b></div>
   </div>
   <div class="legend">
     <span><span class="dot" style="background:#3DBB7E"></span>xavfsiz</span>
-    <span><span class="dot" style="background:#E8D44D"></span>sariq · kuzatuv</span>
-    <span><span class="dot" style="background:#F5A623"></span>to'q sariq · ogohlantirish</span>
-    <span><span class="dot" style="background:#E5484D"></span>qizil · trevoga</span>
-    <span style="margin-left:auto">PM10 chegaralari: 100 / 200 / 400 µg/m³ · manba: Orolqum</span>
+    <span><span class="dot" style="background:#E8D44D"></span>sariq &gt;100</span>
+    <span><span class="dot" style="background:#F5A623"></span>to'q sariq &gt;200</span>
+    <span><span class="dot" style="background:#E5484D"></span>qizil &gt;400 µg/m³ PM10</span>
+    <span style="margin-left:auto" id="legend-note">chang maydoni: CAMS global prognozi</span>
   </div>
 </footer>
 
@@ -77,37 +81,27 @@ const DISTRICTS = {
   "Beruniy":     [41.69, 60.75], "To'rtko'l":   [41.55, 61.00],
   "Urganch":     [41.55, 60.63],
 };
-const SRC = [44.6, 59.4];                 // Orolqum — manba
+const SRC = [44.6, 59.4];
+const LV = {y:100, o:200, r:400};
+const level = v => v>=LV.r?'red':v>=LV.o?'orange':v>=LV.y?'yellow':'ok';
+const COLOR = {ok:'#3DBB7E', yellow:'#E8D44D', orange:'#F5A623', red:'#E5484D'};
+const ACTIONS = {
+  orange: "maktablarda tashqi mashg'ulotlarni cheklash · klinikalarga tayyorlik",
+  red:    "tashqariga chiqmaslik · niqob · maktablar yopiq · 103 tayyor",
+  clear:  "xavf o'tdi — odatdagi rejim",
+};
+const EMOJI = {red:'🔴', orange:'🟠', clear:'🟢'};
+
+// сетка точек для «поля» пыли (реальные данные CAMS по узлам)
+const GLats = [41.0, 42.0, 43.0, 44.0, 45.5];
+const GLons = [56.5, 58.0, 59.5, 61.0, 62.5];
+
 const map = L.map('map', {zoomControl:false}).setView([42.9, 59.9], 7);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-  {attribution:'© OSM · CARTO', maxZoom: 10}).addTo(map);
+  {attribution:'© OSM · CARTO · dust: CAMS/Open-Meteo', maxZoom: 10}).addTo(map);
+L.circleMarker(SRC, {radius:7, color:'#E5484D', fillColor:'#E5484D', fillOpacity:.9})
+  .addTo(map).bindTooltip("Orolqum — chang manbai");
 
-L.circleMarker(SRC, {radius:7, color:'#E5484D', fillColor:'#E5484D',
-  fillOpacity:.9}).addTo(map).bindTooltip("Orolqum — chang manbai");
-
-// bulut trayektoriyasi: janubi-sharqqa (Nukus -> Beruniy/Urganch)
-function plumeAt(t){
-  const f = t/72;
-  const lat = SRC[0] + (41.7 - SRC[0]) * f;
-  const lon = SRC[1] + (60.8 - SRC[1]) * f;
-  const r   = 28000 + 90000 * f;           // radius, m
-  const inten = t < 6 ? t/6 : (t > 58 ? Math.max(0,(72-t)/14) : 1);
-  return {lat, lon, r, inten};
-}
-function pmAt(dKm, p){
-  const core = 650 * p.inten;
-  return Math.round(core * Math.exp(-(dKm*dKm)/(2*Math.pow(p.r/1000*0.75,2))));
-}
-const distKm = (a,b,c,d)=>{const R=6371,dLa=(c-a)*Math.PI/180,dLo=(d-b)*Math.PI/180;
-  const x=Math.sin(dLa/2)**2+Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(dLo/2)**2;
-  return 2*R*Math.asin(Math.sqrt(x));};
-const level = pm => pm>=400?'red':pm>=200?'orange':pm>=100?'yellow':'ok';
-const COLOR = {ok:'#3DBB7E', yellow:'#E8D44D', orange:'#F5A623', red:'#E5484D'};
-
-const plumeLayers = [
-  L.circle(SRC,{radius:1,stroke:false,fillColor:'#F5A623',fillOpacity:.16}).addTo(map),
-  L.circle(SRC,{radius:1,stroke:false,fillColor:'#E08A2E',fillOpacity:.22}).addTo(map),
-  L.circle(SRC,{radius:1,stroke:false,fillColor:'#C25E1E',fillOpacity:.3}).addTo(map)];
 const DIR = {"Nukus":"top", "Xo'jayli":"left", "Urganch":"left",
              "To'rtko'l":"right", "Beruniy":"top"};
 const OFF = {right:[10,0], left:[-10,0], top:[0,-12], bottom:[0,12]};
@@ -116,90 +110,180 @@ for (const [n, ll] of Object.entries(DISTRICTS)){
   const dir = DIR[n] || 'right';
   markers[n] = L.circleMarker(ll, {radius:9, color:'#0B1D33', weight:2,
     fillColor:COLOR.ok, fillOpacity:.95}).addTo(map)
-    .bindTooltip(n, {permanent:true, direction:dir, offset:OFF[dir],
-                     className:'lbl', opacity:.85});
+    .bindTooltip(n, {permanent:true, direction:dir, offset:OFF[dir], className:'lbl', opacity:.85});
 }
-
-// alert lentasini oldindan hisoblash
-const ACTIONS = {
-  orange: "maktablarda tashqi mashg'ulotlarni cheklash · klinikalarga tayyorlik",
-  red:    "tashqariga chiqmaslik · niqob · maktablar yopiq · 103 tayyor",
-  clear:  "xavf o'tdi — odatdagi rejim",
-};
-const EMOJI = {red:'🔴', orange:'🟠', clear:'🟢'};
-const events = [];
-const state = {};
-for (let t=0; t<=72; t++){
-  const p = plumeAt(t);
-  for (const [n, ll] of Object.entries(DISTRICTS)){
-    const pm = pmAt(distKm(ll[0],ll[1],p.lat,p.lon), p);
-    const lv = level(pm);
-    const prev = state[n] || 'ok';
-    if ((lv==='orange'||lv==='red') && lv!==prev) events.push({t, n, lv, pm});
-    if (lv==='ok' && (prev==='orange'||prev==='red')) events.push({t, n, lv:'clear', pm});
-    state[n] = lv;
-  }
+const gridDots = [];
+for (const la of GLats) for (const lo of GLons){
+  gridDots.push(L.circle([la, lo], {radius:26000, stroke:false,
+    fillColor:'#F5A623', fillOpacity:0}).addTo(map));
 }
 
 const feed = document.getElementById('feed');
 const tt = document.getElementById('tt');
 const tval = document.getElementById('tval');
+const loading = document.getElementById('loading');
+const modebtn = document.getElementById('modebtn');
+
+let MODE = 'live';          // live | demo
+let LIVE = null;            // {hours:[iso...], grid:[[v...]/hour], dist:{name:[v...]}, events:[...]}
 
 function alertCard(e){
   const card = document.createElement('div');
   card.className = 'alert ' + (e.lv === 'clear' ? 'clear' : e.lv);
-  const t = document.createElement('div');
-  t.className = 't';
-  t.textContent = `T+${e.t} soat · model: ConvLSTM+CAMS · ishonch 0.8`;
-  const d = document.createElement('div');
-  d.className = 'd';
+  const t = document.createElement('div'); t.className = 't'; t.textContent = e.when;
+  const d = document.createElement('div'); d.className = 'd';
   d.textContent = e.lv === 'clear'
     ? `${EMOJI.clear} ${e.n.toUpperCase()} — xavf o'tdi`
     : `${EMOJI[e.lv]} ${e.n.toUpperCase()} — PM10 ≈ ${e.pm} µg/m³`;
-  const a = document.createElement('div');
-  a.className = 'a';
+  const a = document.createElement('div'); a.className = 'a';
   a.textContent = ACTIONS[e.lv] || '';
   card.append(t, d, a);
   return card;
 }
-
-function render(t){
-  const p = plumeAt(t);
-  plumeLayers.forEach((c,i)=>{
-    c.setLatLng([p.lat, p.lon]);
-    c.setRadius(Math.max(1, p.r*(1-.28*i)*(p.inten>0?1:0)));
-    c.setStyle({fillOpacity: p.inten * [0.16,0.22,0.3][i]});
-  });
-  for (const [n, ll] of Object.entries(DISTRICTS)){
-    const pm = pmAt(distKm(ll[0],ll[1],p.lat,p.lon), p);
-    markers[n].setStyle({fillColor: COLOR[level(pm)]});
-  }
-  tval.textContent = `T+${t} soat`;
+function renderFeed(events, upTo){
   feed.replaceChildren();
-  const visible = events.filter(e=>e.t<=t).reverse();
-  if (!visible.length){
-    const empty = document.createElement('div');
-    empty.className = 'alert clear';
-    const a = document.createElement('div');
-    a.className = 'a';
-    a.textContent = "Hozircha ogohlantirish yo'q — tizim kuzatmoqda.";
-    empty.append(a);
-    feed.append(empty);
-  } else {
-    visible.forEach(e => feed.append(alertCard(e)));
-  }
+  const vis = events.filter(e=>e.t<=upTo).reverse();
+  if (!vis.length){
+    const c = document.createElement('div'); c.className='alert clear';
+    const a = document.createElement('div'); a.className='a';
+    a.textContent = "72 soatlik prognozda chegara oshishi kutilmaydi — tizim kuzatmoqda.";
+    c.append(a); feed.append(c);
+  } else vis.forEach(e => feed.append(alertCard(e)));
 }
-tt.addEventListener('input', ()=>render(+tt.value));
 
-let timer = null;
+// ── JONLI rejim: CAMS orqali Open-Meteo (kalitsiz, CORS ochiq) ──
+async function fetchLive(){
+  const q = (lats, lons) =>
+    `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lats.join(',')}` +
+    `&longitude=${lons.join(',')}&hourly=pm10,dust&forecast_days=4&timezone=Asia%2FTashkent`;
+  const gl = [], gn = [];
+  for (const la of GLats) for (const lo of GLons){ gl.push(la); gn.push(lo); }
+  const dNames = Object.keys(DISTRICTS);
+  const [gRes, dRes] = await Promise.all([
+    fetch(q(gl, gn)).then(r=>r.json()),
+    fetch(q(dNames.map(n=>DISTRICTS[n][0]), dNames.map(n=>DISTRICTS[n][1]))).then(r=>r.json()),
+  ]);
+  const gArr = Array.isArray(gRes) ? gRes : [gRes];
+  const dArr = Array.isArray(dRes) ? dRes : [dRes];
+  const hours = gArr[0].hourly.time;
+  // стартуем с ближайшего часа >= сейчас
+  const nowIso = new Date().toLocaleString('sv-SE', {timeZone:'Asia/Tashkent'})
+                   .slice(0,13).replace(' ','T');
+  let h0 = hours.findIndex(h => h.slice(0,13) >= nowIso);
+  if (h0 < 0) h0 = 0;
+  const H = Math.min(73, hours.length - h0);
+  const val = (o,i) => Math.max(o.hourly.pm10[i] ?? 0, o.hourly.dust[i] ?? 0);
+  const grid = [], dist = {};
+  for (let h=0; h<H; h++) grid.push(gArr.map(o => val(o, h0+h)));
+  dNames.forEach((n,k)=>{ dist[n] = Array.from({length:H}, (_,h)=> val(dArr[k], h0+h)); });
+  // события: пересечения порогов по районам
+  const events = [], state = {};
+  for (let h=0; h<H; h++){
+    for (const n of dNames){
+      const lv = level(dist[n][h]);
+      const prev = state[n] || 'ok';
+      const when = hours[h0+h].replace('T',' ');
+      if ((lv==='orange'||lv==='red') && lv!==prev)
+        events.push({t:h, n, lv, pm:Math.round(dist[n][h]), when:`${when} · CAMS prognozi`});
+      if (lv==='ok' && (prev==='orange'||prev==='red'))
+        events.push({t:h, n, lv:'clear', pm:0, when:`${when} · CAMS prognozi`});
+      state[n] = lv;
+    }
+  }
+  return {hours: hours.slice(h0, h0+H), grid, dist, events, names: dNames};
+}
+
+// ── DEMO rejim: sintetik bo'ron stsenariysi (pitch uchun) ──
+function plumeAt(t){
+  const f = t/72;
+  return {lat: SRC[0] + (41.7-SRC[0])*f, lon: SRC[1] + (60.8-SRC[1])*f,
+          r: 28000 + 90000*f, inten: t<6 ? t/6 : (t>58 ? Math.max(0,(72-t)/14) : 1)};
+}
+const distKm=(a,b,c,d)=>{const R=6371,x=Math.sin((c-a)*Math.PI/360)**2+
+  Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin((d-b)*Math.PI/360)**2;
+  return 2*R*Math.asin(Math.sqrt(x));};
+function demoData(){
+  const names = Object.keys(DISTRICTS);
+  const hours=[], grid=[], dist={}; names.forEach(n=>dist[n]=[]);
+  const gpts=[]; for (const la of GLats) for (const lo of GLons) gpts.push([la,lo]);
+  for (let t=0;t<=72;t++){
+    hours.push(`DEMO+${t}`);
+    const p = plumeAt(t);
+    grid.push(gpts.map(([la,lo])=>{
+      const d=distKm(la,lo,p.lat,p.lon);
+      return 650*p.inten*Math.exp(-(d*d)/(2*Math.pow(p.r/1000*0.9,2)));
+    }));
+    for (const n of names){
+      const d=distKm(...DISTRICTS[n], p.lat, p.lon);
+      dist[n].push(650*p.inten*Math.exp(-(d*d)/(2*Math.pow(p.r/1000*0.75,2))));
+    }
+  }
+  const events=[], state={};
+  for (let t=0;t<=72;t++) for (const n of names){
+    const lv=level(dist[n][t]); const prev=state[n]||'ok';
+    if ((lv==='orange'||lv==='red') && lv!==prev)
+      events.push({t, n, lv, pm:Math.round(dist[n][t]), when:`T+${t} soat · sintetik stsenariy`});
+    if (lv==='ok' && (prev==='orange'||prev==='red'))
+      events.push({t, n, lv:'clear', pm:0, when:`T+${t} soat · sintetik stsenariy`});
+    state[n]=lv;
+  }
+  return {hours, grid, dist, events, names};
+}
+
+let DEMO = null;
+let LIVE_VIEW = null;
+function setMode(m){
+  MODE = m;
+  modebtn.textContent = m==='live' ? '● JONLI rejim' : '◍ DEMO stsenariy';
+  modebtn.classList.toggle('demo', m!=='live');
+  document.getElementById('legend-note').textContent =
+    m==='live' ? "chang maydoni: CAMS global prognozi (jonli)" : "chang maydoni: sintetik bo'ron (namoyish)";
+  LIVE_VIEW = m==='live' ? LIVE : (DEMO ||= demoData());
+  tt.value = 0; renderView(0);
+}
+function renderView(h){
+  const L0 = LIVE_VIEW; if (!L0) return;
+  const g = L0.grid[Math.min(h, L0.grid.length-1)];
+  gridDots.forEach((c,i)=>{
+    const v = g[i] || 0;
+    c.setStyle({fillOpacity: Math.min(0.55, v/700),
+                fillColor: v>=LV.r ? '#E5484D' : v>=LV.o ? '#E08A2E' : '#F5A623'});
+  });
+  for (const n of L0.names){
+    const v = L0.dist[n][Math.min(h, L0.dist[n].length-1)];
+    markers[n].setStyle({fillColor: COLOR[level(v)]});
+  }
+  tval.textContent = String(L0.hours[Math.min(h,L0.hours.length-1)]).includes('DEMO')
+    ? `T+${h} soat (namoyish)`
+    : (h===0 ? `hozir (${L0.hours[0].slice(11)})`
+             : `+${h} soat · ${L0.hours[Math.min(h,L0.hours.length-1)].replace('T',' ')}`);
+  renderFeed(L0.events, h);
+}
+tt.addEventListener('input', ()=>renderView(+tt.value));
+let timer=null;
 document.getElementById('play').addEventListener('click', function(){
   if (timer){ clearInterval(timer); timer=null; this.textContent='▶'; return; }
   this.textContent='⏸';
-  timer = setInterval(()=>{ tt.value = (+tt.value+1)%73; render(+tt.value); }, 120);
+  timer=setInterval(()=>{ tt.value=(+tt.value+1)%73; renderView(+tt.value); },140);
 });
-const t0 = Math.min(72, Math.max(0, parseInt(location.hash.slice(1)) || 0));
-tt.value = t0;
-render(t0);
+modebtn.addEventListener('click', ()=> setMode(MODE==='live' ? 'demo' : 'live'));
+
+(async ()=>{
+  try {
+    LIVE = await fetchLive();
+    const upd = new Date().toTimeString().slice(0,5);
+    document.getElementById('chip-upd').replaceChildren('yangilangan: ', Object.assign(document.createElement('b'),{textContent:upd}));
+    const mx = Math.round(Math.max(...LIVE.names.map(n=>Math.max(...LIVE.dist[n]))));
+    document.getElementById('chip-max').replaceChildren('72s ichida maks PM10: ',
+      Object.assign(document.createElement('b'),{textContent: mx + ' µg/m³'}));
+    setMode('live');
+  } catch(e) {
+    document.getElementById('chip-src').textContent = 'manba oflayn — namoyish rejimi';
+    setMode('demo');
+  } finally {
+    loading.remove();
+  }
+})();
 </script>
 </body>
 </html>
