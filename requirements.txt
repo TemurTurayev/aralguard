@@ -1,0 +1,11 @@
+numpy>=1.26
+pandas>=2.1
+xarray>=2024.1
+netcdf4>=1.6
+cdsapi>=0.7          # Copernicus ADS/CDS
+earthengine-api>=0.1.390
+requests>=2.31
+python-dotenv>=1.0
+torch>=2.2
+matplotlib>=3.8
+aiogram>=3.4         # Telegram bot

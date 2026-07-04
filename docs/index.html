@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<title>AralGuard · boshqaruv paneli</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:Helvetica,Arial,sans-serif; background:#0B1D33; color:#E9F1F7; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+  header { display:flex; align-items:center; gap:18px; padding:12px 22px; background:#0A1729; border-bottom:1px solid #1E4463; }
+  .logo { font-size:22px; font-weight:bold; }
+  .logo span { color:#37C0B8; }
+  .chip { font-size:12px; padding:4px 10px; border:1px solid #1E4463; border-radius:20px; color:#9FB4C8; }
+  .chip b { color:#37C0B8; }
+  .demo { margin-left:auto; font-size:12px; font-weight:bold; padding:4px 12px; border-radius:20px; background:rgba(245,166,35,.13); border:1px solid #F5A623; color:#F5A623; }
+  main { flex:1; display:flex; min-height:0; }
+  #map { flex:1; }
+  aside { width:360px; background:#0A1729; border-left:1px solid #1E4463; display:flex; flex-direction:column; }
+  aside h3 { font-size:14px; letter-spacing:2px; color:#F5A623; padding:14px 18px 8px; }
+  #feed { flex:1; overflow-y:auto; padding:0 14px 14px; }
+  .alert { border:1px solid #1E4463; border-left:4px solid #3DBB7E; border-radius:10px; padding:10px 12px; margin-bottom:10px; background:#10263F; }
+  .alert.red { border-left-color:#E5484D; }
+  .alert.orange { border-left-color:#F5A623; }
+  .alert.clear { border-left-color:#3DBB7E; }
+  .alert .t { font-size:11px; color:#5B7A99; }
+  .alert .d { font-weight:bold; font-size:14.5px; margin:2px 0; }
+  .alert .a { font-size:12.5px; color:#C9D8E6; line-height:1.35; }
+  footer { padding:12px 22px 16px; background:#0A1729; border-top:1px solid #1E4463; }
+  .row { display:flex; align-items:center; gap:14px; }
+  #play { width:40px; height:40px; border-radius:50%; border:2px solid #37C0B8; background:none; color:#37C0B8; font-size:16px; cursor:pointer; }
+  input[type=range] { flex:1; accent-color:#37C0B8; height:6px; }
+  #tlabel { min-width:160px; font-size:15px; }
+  #tlabel b { color:#F5A623; font-size:18px; }
+  .legend { display:flex; gap:14px; font-size:11.5px; color:#9FB4C8; margin-top:8px; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; }
+  .leaflet-container { background:#08131F; }
+  .lbl { background:rgba(10,23,41,.8); border:none; color:#C9D8E6; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Aral<span>Guard</span></div>
+  <div class="chip">CAMS: <b>00z OK</b></div>
+  <div class="chip">MODIS o'tishi: <b>10:42</b></div>
+  <div class="chip">Tugunlar: <b>27/30 onlayn</b></div>
+  <div class="chip">Model: <b>ConvLSTM v0 · skill +0.31 vs CAMS</b></div>
+  <div class="demo">DEMO · sintetik stsenariy</div>
+</header>
+<main>
+  <div id="map"></div>
+  <aside>
+    <h3>OGOHLANTIRISHLAR</h3>
+    <div id="feed"></div>
+  </aside>
+</main>
+<footer>
+  <div class="row">
+    <button id="play">▶</button>
+    <input type="range" id="tt" min="0" max="72" step="1" value="0">
+    <div id="tlabel">Prognoz: <b id="tval">T+0 soat</b></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#3DBB7E"></span>xavfsiz</span>
+    <span><span class="dot" style="background:#E8D44D"></span>sariq · kuzatuv</span>
+    <span><span class="dot" style="background:#F5A623"></span>to'q sariq · ogohlantirish</span>
+    <span><span class="dot" style="background:#E5484D"></span>qizil · trevoga</span>
+    <span style="margin-left:auto">PM10 chegaralari: 100 / 200 / 400 µg/m³ · manba: Orolqum</span>
+  </div>
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const DISTRICTS = {
+  "Nukus":       [42.46, 59.60], "Mo'ynoq":     [43.77, 59.02],
+  "Qo'ng'irot":  [43.08, 58.90], "Chimboy":     [42.93, 59.78],
+  "Taxtako'pir": [43.02, 60.27], "Xo'jayli":    [42.40, 59.45],
+  "Beruniy":     [41.69, 60.75], "To'rtko'l":   [41.55, 61.00],
+  "Urganch":     [41.55, 60.63],
+};
+const SRC = [44.6, 59.4];                 // Orolqum — manba
+const map = L.map('map', {zoomControl:false}).setView([42.9, 59.9], 7);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  {attribution:'© OSM · CARTO', maxZoom: 10}).addTo(map);
+
+L.circleMarker(SRC, {radius:7, color:'#E5484D', fillColor:'#E5484D',
+  fillOpacity:.9}).addTo(map).bindTooltip("Orolqum — chang manbai");
+
+// bulut trayektoriyasi: janubi-sharqqa (Nukus -> Beruniy/Urganch)
+function plumeAt(t){
+  const f = t/72;
+  const lat = SRC[0] + (41.7 - SRC[0]) * f;
+  const lon = SRC[1] + (60.8 - SRC[1]) * f;
+  const r   = 28000 + 90000 * f;           // radius, m
+  const inten = t < 6 ? t/6 : (t > 58 ? Math.max(0,(72-t)/14) : 1);
+  return {lat, lon, r, inten};
+}
+function pmAt(dKm, p){
+  const core = 650 * p.inten;
+  return Math.round(core * Math.exp(-(dKm*dKm)/(2*Math.pow(p.r/1000*0.75,2))));
+}
+const distKm = (a,b,c,d)=>{const R=6371,dLa=(c-a)*Math.PI/180,dLo=(d-b)*Math.PI/180;
+  const x=Math.sin(dLa/2)**2+Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(dLo/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));};
+const level = pm => pm>=400?'red':pm>=200?'orange':pm>=100?'yellow':'ok';
+const COLOR = {ok:'#3DBB7E', yellow:'#E8D44D', orange:'#F5A623', red:'#E5484D'};
+
+const plumeLayers = [
+  L.circle(SRC,{radius:1,stroke:false,fillColor:'#F5A623',fillOpacity:.16}).addTo(map),
+  L.circle(SRC,{radius:1,stroke:false,fillColor:'#E08A2E',fillOpacity:.22}).addTo(map),
+  L.circle(SRC,{radius:1,stroke:false,fillColor:'#C25E1E',fillOpacity:.3}).addTo(map)];
+const DIR = {"Nukus":"top", "Xo'jayli":"left", "Urganch":"left",
+             "To'rtko'l":"right", "Beruniy":"top"};
+const OFF = {right:[10,0], left:[-10,0], top:[0,-12], bottom:[0,12]};
+const markers = {};
+for (const [n, ll] of Object.entries(DISTRICTS)){
+  const dir = DIR[n] || 'right';
+  markers[n] = L.circleMarker(ll, {radius:9, color:'#0B1D33', weight:2,
+    fillColor:COLOR.ok, fillOpacity:.95}).addTo(map)
+    .bindTooltip(n, {permanent:true, direction:dir, offset:OFF[dir],
+                     className:'lbl', opacity:.85});
+}
+
+// alert lentasini oldindan hisoblash
+const ACTIONS = {
+  orange: "maktablarda tashqi mashg'ulotlarni cheklash · klinikalarga tayyorlik",
+  red:    "tashqariga chiqmaslik · niqob · maktablar yopiq · 103 tayyor",
+  clear:  "xavf o'tdi — odatdagi rejim",
+};
+const EMOJI = {red:'🔴', orange:'🟠', clear:'🟢'};
+const events = [];
+const state = {};
+for (let t=0; t<=72; t++){
+  const p = plumeAt(t);
+  for (const [n, ll] of Object.entries(DISTRICTS)){
+    const pm = pmAt(distKm(ll[0],ll[1],p.lat,p.lon), p);
+    const lv = level(pm);
+    const prev = state[n] || 'ok';
+    if ((lv==='orange'||lv==='red') && lv!==prev) events.push({t, n, lv, pm});
+    if (lv==='ok' && (prev==='orange'||prev==='red')) events.push({t, n, lv:'clear', pm});
+    state[n] = lv;
+  }
+}
+
+const feed = document.getElementById('feed');
+const tt = document.getElementById('tt');
+const tval = document.getElementById('tval');
+
+function alertCard(e){
+  const card = document.createElement('div');
+  card.className = 'alert ' + (e.lv === 'clear' ? 'clear' : e.lv);
+  const t = document.createElement('div');
+  t.className = 't';
+  t.textContent = `T+${e.t} soat · model: ConvLSTM+CAMS · ishonch 0.8`;
+  const d = document.createElement('div');
+  d.className = 'd';
+  d.textContent = e.lv === 'clear'
+    ? `${EMOJI.clear} ${e.n.toUpperCase()} — xavf o'tdi`
+    : `${EMOJI[e.lv]} ${e.n.toUpperCase()} — PM10 ≈ ${e.pm} µg/m³`;
+  const a = document.createElement('div');
+  a.className = 'a';
+  a.textContent = ACTIONS[e.lv] || '';
+  card.append(t, d, a);
+  return card;
+}
+
+function render(t){
+  const p = plumeAt(t);
+  plumeLayers.forEach((c,i)=>{
+    c.setLatLng([p.lat, p.lon]);
+    c.setRadius(Math.max(1, p.r*(1-.28*i)*(p.inten>0?1:0)));
+    c.setStyle({fillOpacity: p.inten * [0.16,0.22,0.3][i]});
+  });
+  for (const [n, ll] of Object.entries(DISTRICTS)){
+    const pm = pmAt(distKm(ll[0],ll[1],p.lat,p.lon), p);
+    markers[n].setStyle({fillColor: COLOR[level(pm)]});
+  }
+  tval.textContent = `T+${t} soat`;
+  feed.replaceChildren();
+  const visible = events.filter(e=>e.t<=t).reverse();
+  if (!visible.length){
+    const empty = document.createElement('div');
+    empty.className = 'alert clear';
+    const a = document.createElement('div');
+    a.className = 'a';
+    a.textContent = "Hozircha ogohlantirish yo'q — tizim kuzatmoqda.";
+    empty.append(a);
+    feed.append(empty);
+  } else {
+    visible.forEach(e => feed.append(alertCard(e)));
+  }
+}
+tt.addEventListener('input', ()=>render(+tt.value));
+
+let timer = null;
+document.getElementById('play').addEventListener('click', function(){
+  if (timer){ clearInterval(timer); timer=null; this.textContent='▶'; return; }
+  this.textContent='⏸';
+  timer = setInterval(()=>{ tt.value = (+tt.value+1)%73; render(+tt.value); }, 120);
+});
+const t0 = Math.min(72, Math.max(0, parseInt(location.hash.slice(1)) || 0));
+tt.value = t0;
+render(t0);
+</script>
+</body>
+</html>
